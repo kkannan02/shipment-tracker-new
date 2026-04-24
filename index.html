@@ -1,0 +1,894 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Shipment Tracker</title>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       DEPENDENCIES (loaded from CDN — no installation needed)
+  ════════════════════════════════════════════════════════════════ -->
+  <script src="https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js"></script>
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --navy:       #0f172a;
+      --navy2:      #1e3a5f;
+      --blue:       #0ea5e9;
+      --blue2:      #2563eb;
+      --surface:    rgba(255,255,255,0.06);
+      --border:     rgba(255,255,255,0.09);
+      --text:       #f1f5f9;
+      --muted:      #64748b;
+      --mid:        #94a3b8;
+    }
+
+    body {
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      background: linear-gradient(160deg, var(--navy) 0%, var(--navy2) 60%, var(--navy) 100%);
+      min-height: 100vh;
+      color: var(--text);
+    }
+
+    /* ── TOP BAR ─────────────────────────────────────── */
+    #topbar {
+      background: rgba(255,255,255,0.04);
+      border-bottom: 1px solid var(--border);
+      padding: 12px 24px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      backdrop-filter: blur(12px);
+    }
+    #topbar .logo { font-size: 22px; }
+    #topbar .brand { font-size: 14px; font-weight: 700; letter-spacing: .4px; }
+    #topbar .sub   { font-size: 11px; color: var(--muted); }
+    #topbar #pill  {
+      margin-left: auto;
+      font-size: 11px;
+      color: var(--muted);
+      background: rgba(255,255,255,0.05);
+      padding: 4px 12px;
+      border-radius: 20px;
+    }
+    #topbar #live-dot {
+      display: inline-block;
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: #22c55e;
+      margin-right: 5px;
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+      0%,100% { opacity: 1; }
+      50%      { opacity: .4; }
+    }
+
+    /* ── MAIN ────────────────────────────────────────── */
+    #app { max-width: 760px; margin: 0 auto; padding: 44px 20px 60px; }
+
+    h1 { font-size: 30px; font-weight: 800; letter-spacing: -.5px; }
+    .subtitle { color: var(--muted); margin-top: 8px; font-size: 15px; }
+
+    /* ── AUTH SCREEN ─────────────────────────────────── */
+    #auth-screen {
+      text-align: center;
+      padding: 64px 20px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      margin-top: 32px;
+    }
+    #auth-screen .lock { font-size: 48px; margin-bottom: 16px; }
+    #auth-screen h2   { font-size: 20px; color: var(--text); margin-bottom: 8px; }
+    #auth-screen p    { color: var(--muted); font-size: 14px; margin-bottom: 28px; line-height: 1.6; }
+
+    /* ── SEARCH BOX ──────────────────────────────────── */
+    #search-area {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 24px;
+      backdrop-filter: blur(10px);
+      box-shadow: 0 8px 32px rgba(0,0,0,.3);
+      margin-top: 32px;
+    }
+    .toggle-row { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+    .toggle-btn {
+      padding: 6px 14px; border-radius: 20px; font-size: 12px; font-weight: 600;
+      cursor: pointer; border: none; transition: all .2s;
+      background: rgba(255,255,255,.08); color: var(--mid);
+    }
+    .toggle-btn.active { background: var(--blue); color: #fff; }
+    .search-row { display: flex; gap: 10px; }
+    #search-input {
+      flex: 1; padding: 14px 18px; border-radius: 12px; font-size: 14px;
+      background: rgba(255,255,255,.1); color: var(--text);
+      border: 1px solid rgba(255,255,255,.15); outline: none;
+      transition: border .2s;
+    }
+    #search-input:focus { border-color: var(--blue); }
+    #search-input::placeholder { color: var(--muted); }
+    #search-btn {
+      padding: 14px 28px; border-radius: 12px; font-size: 14px; font-weight: 700;
+      background: linear-gradient(135deg, var(--blue), var(--blue2)); color: #fff;
+      border: none; cursor: pointer;
+      box-shadow: 0 4px 14px rgba(14,165,233,.4); white-space: nowrap;
+      transition: opacity .15s;
+    }
+    #search-btn:hover { opacity: .9; }
+    #clear-btn {
+      margin-top: 10px; background: none; border: none;
+      color: var(--muted); font-size: 12px; cursor: pointer;
+    }
+    #last-updated {
+      margin-top: 12px;
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    /* ── RESULTS ─────────────────────────────────────── */
+    #results { margin-top: 28px; }
+    .result-count { font-size: 13px; color: var(--muted); font-weight: 500; margin-bottom: 14px; }
+
+    /* ── NO RESULTS ──────────────────────────────────── */
+    .empty {
+      text-align: center; padding: 48px 20px;
+      background: var(--surface); border-radius: 16px;
+      border: 1px dashed var(--border);
+    }
+    .empty .icon { font-size: 40px; margin-bottom: 12px; }
+    .empty h3 { font-size: 16px; color: var(--text); margin-bottom: 6px; }
+    .empty p  { font-size: 13px; color: var(--muted); }
+    .empty strong { color: var(--mid); }
+
+    /* ── CARD ────────────────────────────────────────── */
+    .card {
+      background: #fff;
+      border-radius: 16px;
+      overflow: hidden;
+      box-shadow: 0 4px 24px rgba(0,0,0,.12);
+      border: 1px solid #e5e7eb;
+      margin-bottom: 18px;
+      color: #111827;
+    }
+    .card-header {
+      background: linear-gradient(135deg, #0f172a 0%, #1e3a5f 100%);
+      padding: 20px 24px;
+    }
+    .card-header-top {
+      display: flex; justify-content: space-between;
+      align-items: flex-start; gap: 12px;
+    }
+    .card-eyebrow {
+      font-size: 11px; color: #94a3b8; font-weight: 600;
+      letter-spacing: 1px; text-transform: uppercase; margin-bottom: 4px;
+    }
+    .card-supplier { font-size: 18px; color: #fff; font-weight: 700; line-height: 1.3; }
+    .card-po       { font-size: 13px; color: #94a3b8; margin-top: 3px; }
+
+    /* Status badge */
+    .badge {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 4px 10px; border-radius: 20px; font-size: 12px; font-weight: 600;
+      white-space: nowrap; flex-shrink: 0;
+    }
+
+    /* Route row */
+    .route {
+      display: flex; align-items: center; gap: 10px; margin-top: 16px;
+    }
+    .port-box {
+      background: rgba(255,255,255,.1); border-radius: 8px;
+      padding: 6px 14px; text-align: center;
+    }
+    .port-code { font-size: 18px; font-weight: 800; color: #f1f5f9; }
+    .port-label{ font-size: 10px; color: #94a3b8; }
+    .route-line {
+      flex: 1; position: relative;
+      height: 2px; background: rgba(255,255,255,.15); border-radius: 1px;
+    }
+    .route-arrow {
+      position: absolute; right: -2px; top: 50%;
+      transform: translateY(-50%); color: #64748b; font-size: 13px;
+    }
+    .vessel-label {
+      position: absolute; left: 50%; top: -16px;
+      transform: translateX(-50%);
+      font-size: 10px; color: #64748b; white-space: nowrap; font-style: italic;
+    }
+
+    /* Progress bar */
+    .progress-wrap { margin: 16px 0 4px; }
+    .progress-nodes {
+      display: flex; justify-content: space-between; margin-bottom: 6px;
+    }
+    .progress-node {
+      display: flex; flex-direction: column; align-items: center;
+      width: calc(100% / 6);
+    }
+    .progress-dot {
+      width: 10px; height: 10px; border-radius: 50%;
+      background: #374151; margin-bottom: 3px; flex-shrink: 0;
+    }
+    .progress-dot.active  { background: #1d4ed8; }
+    .progress-dot.current {
+      width: 12px; height: 12px;
+      box-shadow: 0 0 0 3px rgba(14,165,233,.25);
+    }
+    .progress-lbl { font-size: 9px; color: #6b7280; font-weight: 400; }
+    .progress-lbl.active  { color: #1d4ed8; }
+    .progress-lbl.current { font-weight: 700; }
+    .progress-bar-track {
+      position: relative; height: 4px; background: #e5e7eb;
+      border-radius: 2px; margin-top: -18px;
+    }
+    .progress-bar-fill {
+      height: 100%; border-radius: 2px;
+      transition: width .6s ease;
+    }
+    .on-hold-bar {
+      display: flex; align-items: center; gap: 8px; margin: 12px 0 4px;
+    }
+    .on-hold-track {
+      flex: 1; height: 4px; border-radius: 2px;
+      background: #fee2e2; overflow: hidden;
+    }
+    .on-hold-fill { width: 100%; height: 100%; background: #ef4444; border-radius: 2px; }
+    .on-hold-label { font-size: 11px; color: #ef4444; font-weight: 600; }
+
+    /* Key dates */
+    .dates-row {
+      display: grid; grid-template-columns: 1fr 1fr 1fr;
+      border-bottom: 1px solid #f3f4f6;
+    }
+    .date-cell {
+      padding: 12px 8px; text-align: center;
+      border-right: 1px solid #f3f4f6;
+    }
+    .date-cell:last-child { border-right: none; }
+    .date-lbl { font-size: 11px; color: #6b7280; font-weight: 600; letter-spacing: .5px; }
+    .date-val  { font-size: 14px; font-weight: 700; color: #0f172a; margin-top: 2px; }
+    .date-val.empty { color: #d1d5db; }
+
+    /* Info rows */
+    .info-section { padding: 0 20px 4px; }
+    .info-row {
+      display: flex; justify-content: space-between; align-items: flex-start;
+      padding: 7px 0; border-bottom: 1px solid #f3f4f6;
+    }
+    .info-lbl  { font-size: 12px; color: #6b7280; font-weight: 500; min-width: 160px; }
+    .info-val  { font-size: 13px; color: #111827; text-align: right; max-width: 60%; }
+    .info-val.hl { color: #1d4ed8; font-weight: 600; }
+
+    /* Remarks */
+    .remarks-box {
+      margin: 4px 20px 16px;
+      background: #f8fafc; border-radius: 10px;
+      padding: 12px 14px; border: 1px solid #e2e8f0;
+    }
+    .remarks-title {
+      font-size: 11px; color: #64748b; font-weight: 700;
+      letter-spacing: .5px; margin-bottom: 6px;
+    }
+    .remarks-text { font-size: 12px; color: #374151; line-height: 1.6; }
+    .remarks-add  { font-size: 12px; color: #6b7280; margin-top: 4px; font-style: italic; }
+
+    /* BUTTONS */
+    .btn {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 13px 28px; border-radius: 12px; font-size: 14px;
+      font-weight: 700; border: none; cursor: pointer; transition: opacity .15s;
+    }
+    .btn:hover { opacity: .9; }
+    .btn-primary {
+      background: linear-gradient(135deg, var(--blue), var(--blue2));
+      color: #fff;
+      box-shadow: 0 4px 14px rgba(14,165,233,.4);
+    }
+    .btn-outline {
+      background: rgba(255,255,255,.08);
+      color: var(--mid);
+      border: 1px solid var(--border);
+    }
+
+    /* LOADER */
+    #loader {
+      display: none; text-align: center; padding: 64px 20px;
+    }
+    .spinner {
+      width: 44px; height: 44px; border-radius: 50%;
+      border: 3px solid rgba(255,255,255,.1);
+      border-top-color: var(--blue);
+      animation: spin .8s linear infinite;
+      margin: 0 auto 16px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    #loader p { color: var(--muted); font-size: 14px; }
+
+    /* ERROR */
+    #error-box {
+      display: none;
+      background: #fef2f2; border: 1px solid #fecaca;
+      border-radius: 12px; padding: 16px 20px; margin-top: 20px;
+      color: #991b1b; font-size: 13px; line-height: 1.5;
+    }
+
+    /* Footer */
+    #footer {
+      text-align: center; padding: 20px; color: var(--muted);
+      font-size: 11px; border-top: 1px solid var(--border); margin-top: 20px;
+    }
+  </style>
+</head>
+<body>
+
+<!-- ─────────── TOP BAR ─────────── -->
+<div id="topbar">
+  <span class="logo">🌊</span>
+  <div>
+    <div class="brand">SHIPMENT TRACKER</div>
+    <div class="sub">LCL Freight Status Portal</div>
+  </div>
+  <div id="pill">
+    <span id="live-dot" style="display:none"></span>
+    <span id="pill-text">Connecting…</span>
+  </div>
+</div>
+
+<!-- ─────────── MAIN ─────────── -->
+<div id="app">
+  <h1>Track Your Shipment</h1>
+  <p class="subtitle">Enter your PO Number or Position Number to get real-time status updates</p>
+
+  <!-- Auth screen (shown before login) -->
+  <div id="auth-screen">
+    <div class="lock">🔐</div>
+    <h2>Sign in with Microsoft</h2>
+    <p>
+      This tracker is connected live to your SharePoint file.<br>
+      Sign in with your Microsoft account to access shipment data.
+    </p>
+    <button class="btn btn-primary" onclick="doLogin()">
+      <svg width="18" height="18" viewBox="0 0 21 21" fill="none">
+        <rect x="1" y="1" width="9" height="9" fill="#F25022"/>
+        <rect x="11" y="1" width="9" height="9" fill="#7FBA00"/>
+        <rect x="1" y="11" width="9" height="9" fill="#00A4EF"/>
+        <rect x="11" y="11" width="9" height="9" fill="#FFB900"/>
+      </svg>
+      Sign in with Microsoft
+    </button>
+  </div>
+
+  <!-- Loader -->
+  <div id="loader">
+    <div class="spinner"></div>
+    <p id="loader-msg">Fetching live data from SharePoint…</p>
+  </div>
+
+  <!-- Error -->
+  <div id="error-box"></div>
+
+  <!-- Search (shown after login & data loaded) -->
+  <div id="search-area" style="display:none">
+    <div class="toggle-row">
+      <button class="toggle-btn active" data-type="both">Both</button>
+      <button class="toggle-btn" data-type="po">PO Number</button>
+      <button class="toggle-btn" data-type="pos">Position No.</button>
+    </div>
+    <div class="search-row">
+      <input id="search-input" type="text" placeholder="e.g. TSL/57439 or 22-0010-605-00" />
+      <button id="search-btn" onclick="doSearch()">Search</button>
+    </div>
+    <button id="clear-btn" onclick="clearSearch()" style="display:none">✕ Clear</button>
+    <div id="last-updated"></div>
+  </div>
+
+  <!-- Results -->
+  <div id="results"></div>
+</div>
+
+<div id="footer">
+  Live data · REPORT_SEA.xlsx · ShipmentRepository · Microsoft Graph API
+</div>
+
+
+<!-- ═══════════════════════════════════════════════════════════════
+     CONFIGURATION — Fill in your Azure AD app details here
+     See the README section below for setup instructions.
+════════════════════════════════════════════════════════════════ -->
+<script>
+"use strict";
+
+// ┌─────────────────────────────────────────────────────────────┐
+// │  ⚙️  CONFIGURATION — edit these 3 values                    │
+// └─────────────────────────────────────────────────────────────┘
+const CONFIG = {
+  // 1. Your Azure AD App (Client) ID — from Azure Portal
+  clientId:  "5f413c67-eb53-4307-b380-2b36a2e39de6",
+
+  // 2. Your Azure AD Tenant ID — from Azure Portal
+  tenantId:  "14652ebc-0855-43ca-82e5-0e5247aa91d7",
+
+  // 3. OneDrive/SharePoint file identifiers (pre-filled — do not change)
+  driveId:   "b!bJcAcJaia0SGTJfNHb0pOLaR5gVnHe9PhAvQuuMTbd7PrdBWzsY5Rp9wwwU7lv5k",
+  itemId:    "012ALW4TQTTF7LQB7TUVAZXC4PQCEYT3M6",
+
+  // 4. Name of the sheet to read from the Excel file
+  sheetName: "LCL",
+};
+// ┌─────────────────────────────────────────────────────────────┐
+// │  END CONFIGURATION                                           │
+// └─────────────────────────────────────────────────────────────┘
+
+
+// ── MSAL SETUP ────────────────────────────────────────────────
+const msalConfig = {
+  auth: {
+    clientId:    CONFIG.clientId,
+    authority:   `https://login.microsoftonline.com/${CONFIG.tenantId}`,
+    redirectUri: "https://kkannan02.github.io/shipment-tracker-new/",
+  },
+  cache: {
+    cacheLocation:         "localStorage",
+    storeAuthStateInCookie: false,
+  }
+};
+
+const loginRequest = {
+  scopes: ["https://graph.microsoft.com/Files.Read.All"]
+};
+
+let msalInstance;
+let allShipments = [];
+let searchType   = "both";
+let fetchedAt    = null;
+
+// ── INIT ──────────────────────────────────────────────────────
+window.addEventListener("DOMContentLoaded", async () => {
+  // Toggle buttons
+  document.querySelectorAll(".toggle-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".toggle-btn").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      searchType = btn.dataset.type;
+      updateSearchPlaceholder();
+    });
+  });
+  document.getElementById("search-input").addEventListener("keydown", e => {
+    if (e.key === "Enter") doSearch();
+  });
+
+  try {
+    msalInstance = new msal.PublicClientApplication(msalConfig);
+    await msalInstance.initialize();
+
+    // Handle redirect (if using redirect flow)
+    const result = await msalInstance.handleRedirectPromise();
+    if (result) {
+      msalInstance.setActiveAccount(result.account);
+    }
+
+    const accounts = msalInstance.getAllAccounts();
+    if (accounts.length > 0) {
+      msalInstance.setActiveAccount(accounts[0]);
+      await loadData();
+    } else {
+      showAuth();
+    }
+  } catch (err) {
+    showError("Failed to initialise authentication: " + err.message);
+  }
+});
+
+// ── AUTH ──────────────────────────────────────────────────────
+function showAuth() {
+  document.getElementById("auth-screen").style.display = "block";
+  document.getElementById("loader").style.display       = "none";
+  setPill(false);
+}
+
+async function doLogin() {
+  try {
+    showLoader("Signing in…");
+    const result = await msalInstance.loginPopup(loginRequest);
+    msalInstance.setActiveAccount(result.account);
+    await loadData();
+  } catch (err) {
+    if (err.errorCode !== "user_cancelled") {
+      showError("Login failed: " + err.message);
+    } else {
+      showAuth();
+    }
+  }
+}
+
+async function getToken() {
+  const account = msalInstance.getActiveAccount();
+  if (!account) throw new Error("Not signed in.");
+  try {
+    const r = await msalInstance.acquireTokenSilent({ ...loginRequest, account });
+    return r.accessToken;
+  } catch (_) {
+    const r = await msalInstance.acquireTokenPopup({ ...loginRequest, account });
+    return r.accessToken;
+  }
+}
+
+// ── DATA LOADING ──────────────────────────────────────────────
+async function loadData() {
+  document.getElementById("auth-screen").style.display = "none";
+  document.getElementById("error-box").style.display   = "none";
+  showLoader("Fetching live data from SharePoint…");
+
+  try {
+    const token  = await getToken();
+    const buffer = await fetchExcelFile(token);
+    allShipments = parseExcel(buffer);
+    fetchedAt    = new Date();
+    showSearchArea();
+  } catch (err) {
+    showError("Could not load the Excel file.<br><strong>Details:</strong> " + err.message +
+      "<br><br>Make sure the Azure AD app has <em>Files.Read.All</em> permission and the file path is correct.");
+  }
+}
+
+async function fetchExcelFile(token) {
+  const url = `https://graph.microsoft.com/v1.0/drives/${CONFIG.driveId}/items/${CONFIG.itemId}/content`;
+  const res  = await fetch(url, { headers: { Authorization: "Bearer " + token } });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Graph API ${res.status}: ${text}`);
+  }
+  return res.arrayBuffer();
+}
+
+function parseExcel(buffer) {
+  const wb    = XLSX.read(new Uint8Array(buffer), { type: "array", cellDates: true });
+  const sheet = wb.Sheets[CONFIG.sheetName];
+  if (!sheet) throw new Error(`Sheet "${CONFIG.sheetName}" not found. Available: ${wb.SheetNames.join(", ")}`);
+  const rows = XLSX.utils.sheet_to_json(sheet, { defval: "" });
+  return rows
+    .filter(r => String(r["PO_number"] || "").trim() || String(r["Position_No"] || "").trim())
+    .map(normaliseRow);
+}
+
+// ── NORMALISE ─────────────────────────────────────────────────
+function fmtDate(v) {
+  if (!v || v === "" || v === "-") return "";
+  if (v instanceof Date) {
+    const dd = String(v.getDate()).padStart(2, "0");
+    const mm = String(v.getMonth() + 1).padStart(2, "0");
+    const yy = v.getFullYear();
+    return `${dd}.${mm}.${yy}`;
+  }
+  const s = String(v).trim();
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return `${m[3]}.${m[2]}.${m[1]}`;
+  return s;
+}
+
+function fmtNum(v) {
+  const s = String(v).replace(/\.0+$/, "");
+  return s === "" || s === "nan" ? "" : s;
+}
+
+function deriveStatus(r) {
+  const sup    = String(r["Supplier"] || "").toLowerCase();
+  const rem    = String(r["Remarks"]  || "").toLowerCase();
+  const sob    = fmtDate(r["Shipped_on_Board"]);
+  const etd    = String(r["ETD"]      || "").trim();
+  const eta    = String(r["ETA"]      || "").trim();
+  const wh     = fmtDate(r["Arrival at Warehouse"]);
+  const bkNo   = String(r["Booking No."] || "").trim();
+  if (sup.includes("on hold") || rem.includes("on hold") || rem.includes("put on hold"))
+    return "On Hold";
+  if (sob && sob !== "") return eta ? "In Transit" : "Shipped";
+  if (etd && etd !== "" && etd !== "-") {
+    return wh ? "At Warehouse / Awaiting Sailing" : "Booked / Awaiting ETD";
+  }
+  if (bkNo) return "Booked";
+  if (wh)   return "At Warehouse";
+  return "Booking Pending";
+}
+
+function normaliseRow(r) {
+  return {
+    supplier:     String(r["Supplier"]             || "").trim(),
+    po_number:    String(r["PO_number"]            || "").trim(),
+    incoterm:     String(r["Incoterm"]             || "").trim(),
+    pol:          String(r["POL"]                  || "").trim(),
+    pod:          String(r["POD"]                  || "").trim(),
+    pieces:       fmtNum(r["No. of Pieces"]        || ""),
+    gross_wt:     fmtNum(r["Gross Wt. (Kgs)"]     || ""),
+    cbm:          String(r["CBM"]                  || "").trim(),
+    vessel:       String(r["Vessel"]               || "").trim(),
+    release_date: fmtDate(r["Release date"]),
+    readiness:    fmtDate(r["Readiness"]),
+    pickup:       fmtDate(r["Pickup"]) || (String(r["Pickup"] || "") === "-" ? "-" : ""),
+    arrival_wh:   fmtDate(r["Arrival at Warehouse"]),
+    etd:          fmtDate(r["ETD"])    || String(r["ETD"]   || "").trim(),
+    sob:          fmtDate(r["Shipped_on_Board"]),
+    eta:          fmtDate(r["ETA"])    || String(r["ETA"]   || "").trim(),
+    z_no:         String(r["Z_No"]                 || "").trim(),
+    position_no:  String(r["Position_No"]          || "").trim(),
+    hbl:          String(r["HBL"]                  || "").trim(),
+    mbl:          String(r["MBL"]                  || "").trim(),
+    booking_no:   String(r["Booking No."]          || "").trim(),
+    remarks:      String(r["Remarks"]              || "").trim(),
+    add_remarks:  String(r["Additional Remarks"]   || "").trim(),
+    status:       deriveStatus(r),
+  };
+}
+
+// ── STATUS CONFIG ─────────────────────────────────────────────
+const STATUS = {
+  "In Transit":                       { color:"#0ea5e9", bg:"#e0f2fe", dot:"#0284c7", icon:"🚢", step:4 },
+  "Shipped":                          { color:"#8b5cf6", bg:"#ede9fe", dot:"#7c3aed", icon:"✅", step:4 },
+  "At Warehouse / Awaiting Sailing":  { color:"#f59e0b", bg:"#fef3c7", dot:"#d97706", icon:"🏭", step:3 },
+  "Booked / Awaiting ETD":            { color:"#3b82f6", bg:"#dbeafe", dot:"#2563eb", icon:"📋", step:2 },
+  "Booked":                           { color:"#3b82f6", bg:"#dbeafe", dot:"#2563eb", icon:"📋", step:2 },
+  "At Warehouse":                     { color:"#f59e0b", bg:"#fef3c7", dot:"#d97706", icon:"🏭", step:2 },
+  "Booking Pending":                  { color:"#6b7280", bg:"#f3f4f6", dot:"#4b5563", icon:"⏳", step:1 },
+  "On Hold":                          { color:"#ef4444", bg:"#fee2e2", dot:"#dc2626", icon:"⚠️", step:0 },
+};
+
+function getCfg(status) { return STATUS[status] || STATUS["Booking Pending"]; }
+
+// ── SEARCH ────────────────────────────────────────────────────
+function doSearch() {
+  const q = document.getElementById("search-input").value.trim().toLowerCase();
+  if (!q) return;
+  document.getElementById("clear-btn").style.display = "inline";
+
+  const res = allShipments.filter(s => {
+    const po  = s.po_number.toLowerCase().includes(q);
+    const pos = s.position_no.toLowerCase().includes(q);
+    if (searchType === "po")  return po;
+    if (searchType === "pos") return pos;
+    return po || pos;
+  });
+
+  const container = document.getElementById("results");
+  if (res.length === 0) {
+    container.innerHTML = `
+      <div class="empty">
+        <div class="icon">🔍</div>
+        <h3>No records found</h3>
+        <p>No shipments match "<strong>${escHtml(q)}</strong>". Check your reference and try again.</p>
+      </div>`;
+  } else {
+    container.innerHTML =
+      `<div class="result-count">${res.length} shipment${res.length > 1 ? "s" : ""} found for "${escHtml(q)}"</div>` +
+      res.map(renderCard).join("");
+  }
+}
+
+function clearSearch() {
+  document.getElementById("search-input").value = "";
+  document.getElementById("results").innerHTML = "";
+  document.getElementById("clear-btn").style.display = "none";
+}
+
+function updateSearchPlaceholder() {
+  const map = {
+    both: "e.g. TSL/57439 or 22-0010-605-00",
+    po:   "e.g. TSL/57439/4415887949",
+    pos:  "e.g. 22-0010-605-00",
+  };
+  document.getElementById("search-input").placeholder = map[searchType] || map.both;
+}
+
+// ── CARD HTML ─────────────────────────────────────────────────
+function renderCard(s) {
+  const cfg     = getCfg(s.status);
+  const isHold  = s.status === "On Hold";
+  const labels  = ["Booking","Booked","Warehouse","Awaiting Sail","In Transit","Delivered"];
+  const maxStep = labels.length - 1;
+
+  let progressHTML;
+  if (isHold) {
+    progressHTML = `
+      <div class="on-hold-bar">
+        <div class="on-hold-track"><div class="on-hold-fill"></div></div>
+        <span class="on-hold-label">ON HOLD</span>
+      </div>`;
+  } else {
+    const pct = (cfg.step / maxStep * 100).toFixed(1);
+    progressHTML = `
+      <div class="progress-wrap">
+        <div class="progress-nodes">
+          ${labels.map((l, i) => `
+            <div class="progress-node">
+              <div class="progress-dot ${i <= cfg.step ? "active" : ""} ${i === cfg.step ? "current" : ""}"
+                   style="${i === cfg.step ? `background:${cfg.dot};border:2px solid ${cfg.color}` : ""}"></div>
+              <span class="progress-lbl ${i <= cfg.step ? "active" : ""} ${i === cfg.step ? "current" : ""}"
+                    style="${i <= cfg.step ? `color:${cfg.color}` : ""}">${l}</span>
+            </div>`).join("")}
+        </div>
+        <div class="progress-bar-track">
+          <div class="progress-bar-fill"
+               style="width:${pct}%;background:linear-gradient(90deg,${cfg.dot},${cfg.color})"></div>
+        </div>
+      </div>`;
+  }
+
+  const infoRows = [
+    { label: "Position No.",        value: s.position_no, hl: true  },
+    { label: "Booking No.",         value: s.booking_no,  hl: true  },
+    { label: "HBL",                 value: s.hbl                    },
+    { label: "MBL",                 value: s.mbl                    },
+    { label: "Z-Number",            value: s.z_no                   },
+    { label: "Incoterm",            value: s.incoterm               },
+    { label: "Pieces",              value: s.pieces                 },
+    { label: "Gross Weight",        value: s.gross_wt ? s.gross_wt + " kg" : "" },
+    { label: "CBM",                 value: s.cbm ? s.cbm + " m³"   : "" },
+    { label: "Release Date",        value: s.release_date           },
+    { label: "Readiness",           value: s.readiness              },
+    { label: "Pickup",              value: s.pickup                 },
+    { label: "Arrival at Warehouse",value: s.arrival_wh             },
+  ].filter(r => r.value && r.value !== "-")
+   .map(r => `
+    <div class="info-row">
+      <span class="info-lbl">${r.label}</span>
+      <span class="info-val ${r.hl ? "hl" : ""}">${escHtml(r.value)}</span>
+    </div>`).join("");
+
+  const remarksHTML = (s.remarks || s.add_remarks) ? `
+    <div class="remarks-box">
+      <div class="remarks-title">REMARKS</div>
+      ${s.remarks ? `<div class="remarks-text">${escHtml(s.remarks)}</div>` : ""}
+      ${s.add_remarks ? `<div class="remarks-add">${escHtml(s.add_remarks)}</div>` : ""}
+    </div>` : "";
+
+  const vesselLine = s.vessel && s.vessel !== "TBA" && s.vessel !== "" ?
+    `<div class="vessel-label">${escHtml(s.vessel)}</div>` : "";
+
+  return `
+  <div class="card">
+    <div class="card-header">
+      <div class="card-header-top">
+        <div>
+          <div class="card-eyebrow">Shipment Record</div>
+          <div class="card-supplier">${escHtml(s.supplier)}</div>
+          <div class="card-po">${escHtml(s.po_number)}</div>
+        </div>
+        <span class="badge" style="background:${cfg.bg};color:${cfg.color};border:1px solid ${cfg.color}33">
+          ${cfg.icon} ${escHtml(s.status)}
+        </span>
+      </div>
+
+      <div class="route">
+        <div class="port-box">
+          <div class="port-code">${escHtml(s.pol || "—")}</div>
+          <div class="port-label">Origin</div>
+        </div>
+        <div class="route-line">
+          ${vesselLine}
+          <span class="route-arrow">▶</span>
+        </div>
+        <div class="port-box">
+          <div class="port-code">${escHtml(s.pod || "—")}</div>
+          <div class="port-label">Destination</div>
+        </div>
+      </div>
+
+      ${progressHTML}
+    </div>
+
+    <div class="dates-row">
+      ${["ETD","SOB","ETA"].map((lbl, i) => {
+        const val = [s.etd, s.sob, s.eta][i];
+        return `<div class="date-cell">
+          <div class="date-lbl">${lbl}</div>
+          <div class="date-val ${val ? "" : "empty"}">${val || "—"}</div>
+        </div>`;
+      }).join("")}
+    </div>
+
+    <div class="info-section">${infoRows}</div>
+    ${remarksHTML}
+  </div>`;
+}
+
+// ── UI HELPERS ────────────────────────────────────────────────
+function showLoader(msg) {
+  document.getElementById("loader").style.display      = "block";
+  document.getElementById("loader-msg").textContent    = msg;
+  document.getElementById("search-area").style.display = "none";
+  document.getElementById("auth-screen").style.display = "none";
+}
+
+function showSearchArea() {
+  document.getElementById("loader").style.display      = "none";
+  document.getElementById("search-area").style.display = "block";
+  setPill(true);
+  if (fetchedAt) {
+    document.getElementById("last-updated").textContent =
+      `⟳ Live · ${allShipments.length} shipments loaded · Fetched at ${fetchedAt.toLocaleTimeString()}`;
+  }
+}
+
+function setPill(live) {
+  const dot  = document.getElementById("live-dot");
+  const text = document.getElementById("pill-text");
+  if (live) {
+    dot.style.display  = "inline-block";
+    text.textContent   = "Live · SharePoint";
+  } else {
+    dot.style.display  = "none";
+    text.textContent   = "Not connected";
+  }
+}
+
+function showError(html) {
+  document.getElementById("loader").style.display      = "none";
+  document.getElementById("error-box").style.display   = "block";
+  document.getElementById("error-box").innerHTML       = "⚠️ " + html;
+  setPill(false);
+}
+
+function escHtml(s) {
+  return String(s)
+    .replace(/&/g,"&amp;").replace(/</g,"&lt;")
+    .replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+}
+</script>
+
+
+<!--
+════════════════════════════════════════════════════════════════
+  📋  SETUP GUIDE  (5-minute one-time configuration)
+════════════════════════════════════════════════════════════════
+
+  Step 1 — Register an Azure AD App
+  ───────────────────────────────────
+  1. Go to https://portal.azure.com → Azure Active Directory → App registrations
+  2. Click "New registration"
+     - Name:               Shipment Tracker
+     - Supported accounts: Accounts in this organizational directory only
+                           (or "any org" if clients are external)
+     - Redirect URI:       Single-page application (SPA)
+                           URL: https://where-you-host-this-file.com/shipment-tracker-live.html
+  3. Click Register
+  4. Copy the "Application (client) ID"  → paste as clientId  in CONFIG above
+  5. Copy the "Directory (tenant) ID"    → paste as tenantId  in CONFIG above
+
+  Step 2 — Grant API permission
+  ───────────────────────────────
+  1. In your new app → API permissions → Add a permission
+  2. Microsoft Graph → Delegated permissions
+  3. Search for and add:  Files.Read.All
+  4. Click "Grant admin consent"
+
+  Step 3 — Host the HTML file
+  ────────────────────────────
+  Options (pick one):
+  A. SharePoint: Upload to a document library → use the file URL
+  B. Azure Static Web Apps (free tier, 1-click deploy from GitHub)
+  C. Any HTTPS web server / CDN
+
+  Step 4 — Share with clients
+  ────────────────────────────
+  Option A — If clients have Microsoft accounts (recommended):
+    Add them as Guest users in your Azure AD tenant.
+    They sign in once and the app silently refreshes after that.
+
+  Option B — If clients don't have Microsoft accounts:
+    Change "Supported account types" in the app registration to
+    "Accounts in any organizational directory AND personal Microsoft accounts".
+    Clients can sign in with any Microsoft / Outlook / Hotmail account.
+
+  That's it — the file stays in your SharePoint, 
+  the tracker always shows live data. 🎉
+════════════════════════════════════════════════════════════════
+-->
+
+</body>
+</html>
